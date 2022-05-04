@@ -1,0 +1,237 @@
+#!/bin/sh
+
+# Author: Dre Tech Tips
+# A non bloated way to work with OpenVPN. 
+
+# Features
+# Add, Remove, and Modify OpenVPN Configruation Files
+# Import OpenVPN Configuration Files
+# Start your VPN connection
+# Completely stop and disable VPN connection
+# Add and Remove VPN Startup on Login for users
+
+# Checks depedency
+
+CONF_TEMPLATE="client
+dev tun
+remote example.com
+resolv-retry infinite
+nobind
+persist-key
+persist-tun
+ca [inline]
+cert [inline]
+key [inline]
+tls-auth [inline] 1
+verb 1
+keepalive 10 120
+port 1194
+proto udp
+cipher BF-CBC
+comp-lzo
+remote-cert-tls server
+<ca>
+
+</ca>
+<cert>
+
+</cert>
+<key>
+
+</key>
+<tls-auth>
+
+</tls-auth>"
+
+OPENVPN_CLIENT_CONF_DIR="/etc/openvpn/client"
+
+EXTERNAL_IP=$(dig +short myip.opendns.com @resolver1.opendns.com)
+STATUS=$(echo "Connected to: $EXTERNAL_IP($(geoiplookup $EXTERNAL_IP | awk '{ print $4 }'))")
+
+OPTION_A="✅ Set Current VPN"
+OPTION_B="🚀 Set Startup VPN"
+OPTION_C="➕ Add VPN"
+OPTION_D="⬇ Import VPN"
+OPTION_E="✏ Modify VPN"
+OPTION_F="➖ Delete VPN"
+OPTION_G="❌ Disable VPN"
+
+OPTIONS="$STATUS\n|\n$OPTION_A\n$OPTION_B\n$OPTION_C\n$OPTION_D\n$OPTION_E\n$OPTION_F\n$OPTION_G"
+
+checkdeps() {
+  which systemctl || $(notify-send "❌ systemctl is not installed" && exit 1)
+  which dmenufm || $(notify-send "❌ dmenufm is not installed." && exit 1)
+  which openvpn || $(notify-send "❌ openvpn is not installed" && exit 1)
+  which ufw || $(notify-send "❌ ufw is not installed" && exit 1)
+  which geoiplookup || $(notify-send "❌ geoip is not installed" && exit 1)
+}
+
+getoptions() {
+  OPTION_SELECTED=$(echo -e "$OPTIONS" | dmenu -i -p "Select VPN Options")
+  echo "$OPTION_SELECTED"
+}
+
+addvpn() {
+  FILENAME=$(echo -e "" | dmenu -i -p "Enter Configuration Name")
+  EXT=$(echo -e ".ovpn\n.conf" | dmenu -i -p "Enter Extension")
+  NAME=$FILENAME$EXT
+  touch /tmp/$NAME
+  echo "$CONF_TEMPLATE" > /tmp/$NAME
+  ${FM_OPENER:-${opener:-xdg-open}} "/tmp/$NAME"
+
+  sudo -A mv /tmp/$NAME $OPENVPN_CLIENT_CONF_DIR/$NAME
+}
+
+modifyvpn() {
+  FILEPATH=$(getvpn)
+  ${FM_OPENER:-${opener:-xdg-open}} "$FILEPATH"
+}
+
+deletevpn() {
+  FILEPATH=$(getvpn)
+  sudo -A rm $FILEPATH 
+}
+
+startupvpn() {
+  NAME=$(getvpnfn)
+
+  VPNs=$(listvpn)
+  
+  for VPN in $VPNs
+  do 
+    sudo -A systemctl disable openvpn-client@$VPN
+  done
+  
+  sudo -A systemctl enable openvpn-client@$NAME
+  enablekillswitch
+}
+
+currentvpn() {
+  NAME=$(getvpnfn)
+
+  VPNs=$(listvpn)
+
+  for VPN in $VPNs 
+  do 
+    sudo -A systemctl stop openvpn-client@$VPN
+  done
+  sudo -A systemctl start openvpn-client@$NAME
+  startkillswitch
+}
+
+disablevpn() {
+  NAME=$(getvpnfn)
+  sudo -A systemctl stop openvpn-client@$NAME
+  sudo -A systemctl disable openvpn-client@$NAME
+  stopkillswitch
+  disablekillswitch
+}
+
+importvpn() {
+  VPN_FILE=dmenufm
+  while [[ ! $VPN_FILE == *".conf"*  && ! $VPN_FILE == *".ovpn"* ]]
+  do 
+    CONTINUE=$(echo -e "yes\nno" | dmenu -i -p "Not a .conf or .ovpn file. Would you like to select again?")
+    case $CONTINUE in
+      "yes")
+        VPN_FILE=dmenufm
+        ;;
+      "no") exit ;;
+      *) exit;;
+    esac
+    
+  done
+  cp $VPN_FILE $OPENVPN_CLIENT_CONF_DIR
+}
+
+listvpn() {
+  echo $(cd $OPENVPN_CLIENT_CONF_DIR && ls || notify-send "💾 Unable to access OpenVPN Client Directory" | exit 1)
+}
+
+getvpn () {
+  echo $OPENVPN_CLIENT_CONF_DIR/$(getvpnfn)
+}
+
+getvpnfn() {
+  CONF_FILE=$(listvpn | dmenu -i -p "Select VPN Config File.")
+  echo $CONF_FILE
+}
+
+startkillswitch() {
+  sudo -A ufw default deny outgoing
+  sudo -A ufw default deny incoming
+
+  cd $OPENVPN_CLIENT_CONF_DIR
+  
+  CONFIGS=$(listvpn)
+
+  for FILE in $CONFIGS
+  do
+    HOSTNAME=$(cat $FILE | grep "remote " | sub | tr)
+    PORT=$(cat $FILE | grep "port " | sub | tr)
+    sudo -A ufw allow out to $HOSTNAME port $PORT proto udp
+    sudo -A ufw allow in from $HOSTNAME port $PORT proto udp
+  done
+
+}
+
+stopkillswitch() {
+  sudo -A ufw default allow outgoing
+  sudo -A ufw default allow incoming 
+
+  CONFIGS=$()
+
+  while read LINE; do
+    sudo -A ufw delete out to $HOSTNAME port $PORT proto udp 
+    sudo -A ufw delete in from $HOSTNAME port $PORT proto udp
+  done < $CONFIGS 
+}
+
+enablekillswitch() {
+  echo "dmenuvpn --killswitch" >> "$HOME/.profile"
+}
+
+disablekillswitch() {
+  cat "$HOME/.profile" | grep -v "dmenuvpn --killswitch" >> "$HOME/.profile"
+}
+
+selectoptions() {
+  OPTION=$(getoptions)
+  case $OPTION in 
+    $OPTION_A) 
+      currentvpn 
+      ;;
+    $OPTION_B) 
+      startupvpn
+      ;;
+    $OPTION_C) 
+      addvpn 
+      ;;
+    $OPTION_D) 
+      importvpn
+      ;;
+    $OPTION_E) 
+      modifyvpn 
+      ;;
+    $OPTION_F)
+      deletevpn 
+      ;;
+    $OPTION_G)
+      disablevpn
+      ;;
+    *) 
+      exit
+      ;;
+  esac
+}
+
+case $* in
+  "*--killswitch*")
+    startkillswitch
+    exit
+    ;;
+esac
+
+checkdeps
+selectoptions
+

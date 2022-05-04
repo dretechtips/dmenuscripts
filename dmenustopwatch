@@ -1,0 +1,4 @@
+CONTINUE="$(dmenu -i -p "Start stopwatch? [Y/n]")"
+if [[ ! $CONTINUE =~ ^[Yy]$ ]];then exit 1
+fi
+setsid st -e termdown

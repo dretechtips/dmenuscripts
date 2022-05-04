@@ -1,0 +1,15 @@
+HOURS="$(dmenu -i -p "[HOURS]")"
+if ! [ "$HOURS" -eq "$HOURS" ]; then exit 1
+fi
+MINUTES="$(dmenu -i -p "[MINUTES]")"
+if ! [ "$MINUTES" -eq "$MINUTES" ]; then exit 1
+fi
+SECONDS="$(dmenu -i -p "[SECONDS]")"
+if ! [ "$SECONDS" -eq "$SECONDS" ]; then exit 1
+fi
+
+CONTINUE="$(dmenu -i -p "[${HOURS}h:${MINUTES}m:${SECONDS}s] Is this correct? [Y/n]")"
+if [[ ! $CONTINUE =~ ^[Yy]$ ]];then exit 1
+fi
+
+setsid st -e termdown "${HOURS}h${MINUTES}m${SECONDS}s"
